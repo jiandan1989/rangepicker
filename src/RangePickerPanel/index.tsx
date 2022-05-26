@@ -1,21 +1,21 @@
 import classNames from 'classnames';
 import useMergedState from 'rc-util/lib/hooks/useMergedState';
 import React, { Fragment, useEffect, useRef, useState } from 'react';
-import type { PickerPanelProps } from '.';
-import { PICKER_PREFIX_CLS } from './constant';
-import type { GenerateConfig } from './generate';
-import useHoverValue from './hooks/useHoverValue';
-import useRangeDisabled from './hooks/useRangeDisabled';
-import useRangeViewDates from './hooks/useRangeViewDates';
-import useTextValueMapping from './hooks/useTextValueMapping';
-import useValueTexts from './hooks/useValueTexts';
-import type { DisabledTimes, EventValue, PanelMode, PickerMode, RangeValue } from './interface';
-import PanelContext from './PanelContext';
-import type { DateRender } from './panels/DatePanel/DateBody';
-import type { SharedTimeProps } from './panels/TimePanel';
-import type { PickerBaseProps, PickerDateProps, PickerTimeProps } from './Picker';
-import PickerPanel from './PickerPanel';
-import RangeContext from './RangeContext';
+import type { PickerPanelProps } from '..';
+import { PICKER_PREFIX_CLS } from '../constant';
+import { ResultContext } from '../context';
+import type { GenerateConfig } from '../generate';
+import useRangeDisabled from '../hooks/useRangeDisabled';
+import useRangeViewDates from '../hooks/useRangeViewDates';
+import type { DisabledTimes, EventValue, PanelMode, PickerMode, RangeValue } from '../interface';
+import PanelContext from '../PanelContext';
+import type { DateRender } from '../panels/DatePanel/DateBody';
+import type { SharedTimeProps } from '../panels/TimePanel';
+import type { PickerBaseProps, PickerDateProps, PickerTimeProps } from '../Picker';
+import PickerPanel from '../PickerPanel';
+import RangeContext from '../RangeContext';
+import RangeResult from '../result/range';
+import ShortCutPanel from '../ShortCutPanel';
 import {
   formatValue,
   getClosingViewDate,
@@ -23,12 +23,11 @@ import {
   isSameDate,
   isSameQuarter,
   isSameWeek,
-  parseValue,
-} from './utils/dateUtil';
-import getExtraFooter from './utils/getExtraFooter';
-import getRanges from './utils/getRanges';
-import { getValue, toArray, updateValues } from './utils/miscUtil';
-import { getDefaultFormat } from './utils/uiUtil';
+} from '../utils/dateUtil';
+import getExtraFooter from '../utils/getExtraFooter';
+import { getValue, toArray, updateValues } from '../utils/miscUtil';
+import { getDefaultFormat } from '../utils/uiUtil';
+import './index.less';
 
 function reorderValues<DateType>(
   values: RangeValue<DateType>,
@@ -80,7 +79,6 @@ export type RangePickerPanelSharedProps<DateType> = {
   defaultValue?: RangeValue<DateType>;
   defaultPickerValue?: [DateType, DateType];
   disabled?: boolean | [boolean, boolean];
-  separator?: string;
   disabledTime?: (date: EventValue<DateType>, type: RangeType) => DisabledTimes;
   ranges?: Record<
     string,
@@ -103,7 +101,7 @@ export type RangePickerPanelSharedProps<DateType> = {
   /** @private Internal control of active picker. Do not use since it's private usage */
   activePickerIndex?: 0 | 1;
   dateRender?: RangeDateRender<DateType>;
-  panelRender: ((originPanel: React.ReactNode) => React.ReactNode)[];
+  panelRender?: ((originPanel: React.ReactNode) => React.ReactNode)[];
 };
 
 type OmitPickerProps<Props> = Omit<
@@ -171,37 +169,29 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
     defaultValue,
     defaultPickerValue,
     disabledDate,
-    separator = '~',
     disabledTime,
     dateRender,
-    panelRender,
     ranges,
     allowEmpty,
-    pickerRef,
     mode,
     renderExtraFooter,
     onChange,
     onPanelChange,
     onCalendarChange,
-    onOk,
-
     components,
     order,
     direction,
     activePickerIndex,
   } = props as MergedRangePickerProps<DateType>;
 
-  const needConfirmButton: boolean = (picker === 'date' && !!showTime) || picker === 'time';
+  // const needConfirmButton: boolean = (picker === 'date' && !!showTime) || picker === 'time';
+  const needConfirmButton = false;
 
   // We record opened status here in case repeat open with picker
   const openRecordsRef = useRef<Record<number, boolean>>({});
 
-  const containerRef = useRef<HTMLDivElement>(null);
   const panelDivRef = useRef<HTMLDivElement>(null);
   const startInputDivRef = useRef<HTMLDivElement>(null);
-  const separatorRef = useRef<HTMLDivElement>(null);
-  // const startInputRef = useRef<HTMLInputElement>(null);
-  const endInputRef = useRef<HTMLInputElement>(null);
   const arrowRef = useRef<HTMLDivElement>(null);
 
   // ============================ Warning ============================
@@ -290,8 +280,6 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
     },
     false,
     false,
-    // openRecordsRef.current[1],
-    // openRecordsRef.current[0],
   );
 
   // ============================ Trigger ============================
@@ -363,9 +351,9 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
         }
 
         // Clean up cache since invalidate
-        openRecordsRef.current = {
-          [sourceIndex]: true,
-        };
+        // openRecordsRef.current = {
+        //   [sourceIndex]: true,
+        // };
       } else if (picker !== 'time' || order !== false) {
         // Reorder when in same date
         values = reorderValues(values, generateConfig);
@@ -409,8 +397,6 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
       }
     }
 
-    // >>>>> Open picker when
-
     // Always open another picker if possible
     let nextOpenIndex: 0 | 1 | null = null;
     if (sourceIndex === 0 && !mergedDisabled[1]) {
@@ -433,80 +419,18 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
   }
 
   // ============================= Text ==============================
-  const sharedTextHooksProps = {
-    formatList,
-    generateConfig,
-    locale,
-  };
-
-  const [startValueTexts, firstStartValueText] = useValueTexts<DateType>(
-    getValue(selectedValue, 0),
-    sharedTextHooksProps,
-  );
-
-  const [endValueTexts, firstEndValueText] = useValueTexts<DateType>(
-    getValue(selectedValue, 1),
-    sharedTextHooksProps,
-  );
-
-  const onTextChange = (newText: string, index: 0 | 1) => {
-    const inputDate = parseValue(newText, {
-      locale,
-      formatList,
-      generateConfig,
-    });
-
-    const disabledFunc = index === 0 ? disabledStartDate : disabledEndDate;
-
-    if (inputDate && !disabledFunc(inputDate)) {
-      setSelectedValue(updateValues(selectedValue, inputDate, index));
-      setViewDate(inputDate, index);
-    }
-  };
-
-  const [startText, triggerStartTextChange, resetStartText] = useTextValueMapping({
-    valueTexts: startValueTexts,
-    onTextChange: (newText) => onTextChange(newText, 0),
-  });
-
-  const [endText, triggerEndTextChange, resetEndText] = useTextValueMapping({
-    valueTexts: endValueTexts,
-    onTextChange: (newText) => onTextChange(newText, 1),
-  });
 
   const [rangeHoverValue, setRangeHoverValue] = useState<RangeValue<DateType>>(null);
 
   // ========================== Hover Range ==========================
   const [hoverRangedValue, setHoverRangedValue] = useState<RangeValue<DateType>>(null);
 
-  const [startHoverValue, onStartEnter, onStartLeave] = useHoverValue(startText, {
-    formatList,
-    generateConfig,
-    locale,
-  });
-
-  const [endHoverValue, onEndEnter, onEndLeave] = useHoverValue(endText, {
-    formatList,
-    generateConfig,
-    locale,
-  });
-
   const onDateMouseEnter = (date: DateType) => {
     setHoverRangedValue(updateValues(selectedValue, date, mergedActivePickerIndex));
-    if (mergedActivePickerIndex === 0) {
-      onStartEnter(date);
-    } else {
-      onEndEnter(date);
-    }
   };
 
   const onDateMouseLeave = () => {
     setHoverRangedValue(updateValues(selectedValue, null, mergedActivePickerIndex));
-    if (mergedActivePickerIndex === 0) {
-      onStartLeave();
-    } else {
-      onEndLeave();
-    }
   };
 
   const mergedOpen = true;
@@ -531,22 +455,22 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
         })
       : '';
 
-  useEffect(() => {
-    if (!mergedOpen) {
-      setSelectedValue(mergedValue);
+  // useEffect(() => {
+  //   if (!mergedOpen) {
+  //     setSelectedValue(mergedValue);
 
-      if (!startValueTexts.length || startValueTexts[0] === '') {
-        triggerStartTextChange('');
-      } else if (firstStartValueText !== startText) {
-        resetStartText();
-      }
-      if (!endValueTexts.length || endValueTexts[0] === '') {
-        triggerEndTextChange('');
-      } else if (firstEndValueText !== endText) {
-        resetEndText();
-      }
-    }
-  }, [mergedOpen, startValueTexts, endValueTexts]);
+  //     if (!startValueTexts.length || startValueTexts[0] === '') {
+  //       triggerStartTextChange('');
+  //     } else if (firstStartValueText !== startText) {
+  //       resetStartText();
+  //     }
+  //     if (!endValueTexts.length || endValueTexts[0] === '') {
+  //       triggerEndTextChange('');
+  //     } else if (firstEndValueText !== endText) {
+  //       resetEndText();
+  //     }
+  //   }
+  // }, [mergedOpen, startValueTexts, endValueTexts]);
 
   // Sync innerValue with control mode
   useEffect(() => {
@@ -566,25 +490,6 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
   //       '`disabled` should not set with empty `value`. You should set `allowEmpty` or `value` instead.',
   //     );
   //   }
-  // }
-
-  // ============================ Private ============================
-  // if (pickerRef) {
-  //   pickerRef.current = {
-  //     focus: () => {
-  //       if (startInputRef.current) {
-  //         startInputRef.current.focus();
-  //       }
-  //     },
-  //     blur: () => {
-  //       if (startInputRef.current) {
-  //         startInputRef.current.blur();
-  //       }
-  //       if (endInputRef.current) {
-  //         endInputRef.current.blur();
-  //       }
-  //     },
-  //   };
   // }
 
   // ============================ Ranges =============================
@@ -608,6 +513,8 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
       },
     };
   });
+
+  console.log(rangeLabels, 'rangeLabels>>>>>>>>>>>');
 
   // ============================= Panel =============================
   function renderPanel(
@@ -644,58 +551,6 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
         });
     }
 
-    const baseNode = (
-      <PickerPanel<DateType>
-        {...(props as any)}
-        {...panelProps}
-        dateRender={panelDateRender}
-        showTime={panelShowTime}
-        // mode={mergedModes[mergedActivePickerIndex]}
-        generateConfig={generateConfig}
-        style={undefined}
-        direction={direction}
-        disabledDate={mergedActivePickerIndex === 0 ? disabledStartDate : disabledEndDate}
-        disabledTime={(date) => {
-          if (disabledTime) {
-            return disabledTime(date, mergedActivePickerIndex === 0 ? 'start' : 'end');
-          }
-          return false;
-        }}
-        // className={classNames({
-        //   [`${prefixCls}-panel-focused`]:
-        //     mergedActivePickerIndex === 0 ? !startTyping : !endTyping,
-        // })}
-        value={getValue(selectedValue, mergedActivePickerIndex)}
-        locale={locale}
-        tabIndex={-1}
-        onPanelChange={(date, newMode) => {
-          // clear hover value when panel change
-          if (mergedActivePickerIndex === 0) {
-            onStartLeave(true);
-          }
-          if (mergedActivePickerIndex === 1) {
-            onEndLeave(true);
-          }
-          triggerModesChange(
-            updateValues(mergedModes, newMode, mergedActivePickerIndex),
-            updateValues(selectedValue, date, mergedActivePickerIndex),
-          );
-
-          let viewDate = date;
-          if (panelPosition === 'right' && mergedModes[mergedActivePickerIndex] === newMode) {
-            viewDate = getClosingViewDate(viewDate, newMode as any, generateConfig, -1);
-          }
-          setViewDate(viewDate, mergedActivePickerIndex);
-        }}
-        onOk={null}
-        onSelect={undefined}
-        onChange={undefined}
-        defaultValue={
-          mergedActivePickerIndex === 0 ? getValue(selectedValue, 1) : getValue(selectedValue, 0)
-        }
-      />
-    );
-
     // const render = panelPosition === 'left' ? panelRender[0] : panelRender[1];
 
     return (
@@ -707,24 +562,64 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
           hoverRangedValue: panelHoverRangedValue,
         }}
       >
-        {baseNode}
-        {/* {render(baseNode)} */}
-        {/* <div className={`${prefixCls}-panel-wrapper`}>
-        </div> */}
+        <PickerPanel<DateType>
+          {...(props as any)}
+          {...panelProps}
+          dateRender={panelDateRender}
+          showTime={panelShowTime}
+          // mode={mergedModes[mergedActivePickerIndex]}
+          generateConfig={generateConfig}
+          style={undefined}
+          direction={direction}
+          disabledDate={mergedActivePickerIndex === 0 ? disabledStartDate : disabledEndDate}
+          disabledTime={(date) => {
+            if (disabledTime) {
+              return disabledTime(date, mergedActivePickerIndex === 0 ? 'start' : 'end');
+            }
+            return false;
+          }}
+          // className={classNames({
+          //   [`${prefixCls}-panel-focused`]:
+          //     mergedActivePickerIndex === 0 ? !startTyping : !endTyping,
+          // })}
+          value={getValue(selectedValue, mergedActivePickerIndex)}
+          locale={locale}
+          tabIndex={-1}
+          onPanelChange={(date, newMode) => {
+            // clear hover value when panel change
+            if (mergedActivePickerIndex === 0) {
+              // onStartLeave(true);
+            }
+            if (mergedActivePickerIndex === 1) {
+              // onEndLeave(true);
+            }
+            triggerModesChange(
+              updateValues(mergedModes, newMode, mergedActivePickerIndex),
+              updateValues(selectedValue, date, mergedActivePickerIndex),
+            );
+
+            let viewDate = date;
+            if (panelPosition === 'right' && mergedModes[mergedActivePickerIndex] === newMode) {
+              viewDate = getClosingViewDate(viewDate, newMode as any, generateConfig, -1);
+            }
+            setViewDate(viewDate, mergedActivePickerIndex);
+          }}
+          onOk={null}
+          onSelect={undefined}
+          onChange={undefined}
+          defaultValue={
+            mergedActivePickerIndex === 0 ? getValue(selectedValue, 1) : getValue(selectedValue, 0)
+          }
+        />
       </RangeContext.Provider>
     );
   }
 
   let arrowLeft: number = 0;
   let panelLeft: number = 0;
-  if (
-    mergedActivePickerIndex &&
-    startInputDivRef.current &&
-    separatorRef.current &&
-    panelDivRef.current
-  ) {
+  if (mergedActivePickerIndex && startInputDivRef.current && panelDivRef.current) {
     // Arrow offset
-    arrowLeft = startInputDivRef.current.offsetWidth + separatorRef.current.offsetWidth;
+    // arrowLeft = startInputDivRef.current.offsetWidth + separatorRef.current.offsetWidth;
 
     // If panelWidth - arrowWidth - arrowMarginLeft < arrowLeft, panel should move to right side.
     // If offsetLeft > arrowLeft, arrow position is absolutely right, because arrowLeft is not calculated with arrow margin.
@@ -752,39 +647,37 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
       renderExtraFooter,
     );
 
-    const rangesNode = getRanges({
-      prefixCls,
-      components,
-      needConfirmButton,
-      okDisabled:
-        !getValue(selectedValue, mergedActivePickerIndex) ||
-        (disabledDate && disabledDate(selectedValue[mergedActivePickerIndex])),
-      locale,
-      rangeList,
-      // onOk: () => {
-      //   if (getValue(selectedValue, mergedActivePickerIndex)) {
-      //     // triggerChangeOld(selectedValue);
-      //     triggerChange(selectedValue, mergedActivePickerIndex);
-      //     if (onOk) {
-      //       onOk(selectedValue);
-      //     }
-      //   }
-      // },
-    });
+    // const rangesNode = getRanges({
+    //   prefixCls,
+    //   components,
+    //   needConfirmButton,
+    //   okDisabled:
+    //     !getValue(selectedValue, mergedActivePickerIndex) ||
+    //     (disabledDate && disabledDate(selectedValue[mergedActivePickerIndex])),
+    //   locale,
+    //   rangeList,
+    //   // onOk: () => {
+    //   //   if (getValue(selectedValue, mergedActivePickerIndex)) {
+    //   //     // triggerChangeOld(selectedValue);
+    //   //     triggerChange(selectedValue, mergedActivePickerIndex);
+    //   //     if (onOk) {
+    //   //       onOk(selectedValue);
+    //   //     }
+    //   //   }
+    //   // },
+    // });
 
     const viewDate = getViewDate(mergedActivePickerIndex);
     const nextViewDate = getClosingViewDate(viewDate, picker, generateConfig);
 
     const leftPanel = renderPanel('left', {
       pickerValue: viewDate,
-      // mode: 'date',
       onPickerValueChange: (newViewDate) => {
         setViewDate(newViewDate, mergedActivePickerIndex);
       },
     });
     const rightPanel = renderPanel('right', {
       pickerValue: nextViewDate,
-      // mode: 'date',
       onPickerValueChange: (newViewDate) => {
         setViewDate(
           getClosingViewDate(newViewDate, picker, generateConfig, -1),
@@ -802,26 +695,32 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
     const mergedNodes: React.ReactNode = (
       <Fragment>
         <div className={`${prefixCls}-panels`}>{panels}</div>
-        {(extraNode || rangesNode) && (
+        {/* {(extraNode || rangesNode) && (
           <div className={`${prefixCls}-footer`}>
             {extraNode}
             {rangesNode}
           </div>
-        )}
+        )} */}
       </Fragment>
     );
 
     return (
-      <div
-        className={`${prefixCls}-panel-container`}
-        style={{ marginLeft: panelLeft }}
-        ref={panelDivRef}
-        onMouseDown={(e) => {
-          e.preventDefault();
+      <ResultContext.Provider
+        value={{
+          selectedValue,
         }}
       >
-        {mergedNodes}
-      </div>
+        <div
+          className={`${prefixCls}-panel-container`}
+          style={{ marginLeft: panelLeft }}
+          ref={panelDivRef}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
+        >
+          {mergedNodes}
+        </div>
+      </ResultContext.Provider>
     );
   }
 
@@ -830,12 +729,7 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
       className={classNames(`${prefixCls}-range-wrapper`, `${prefixCls}-${picker}-range-wrapper`)}
       style={{ display: 'inline-flex', flexDirection: 'column' }}
     >
-      <div ref={arrowRef} className={`${prefixCls}-range-arrow`} style={arrowPositionStyle} />
-      <div className={`${prefixCls}-range-header`} style={{ height: 32, background: '#0ae' }}>
-        {startHoverValue}
-        {(startHoverValue || endHoverValue) && separator}
-        {endHoverValue}
-      </div>
+      {/* <div ref={arrowRef} className={`${prefixCls}-range-arrow`} style={arrowPositionStyle} /> */}
       {renderPanels()}
     </div>
   );
@@ -848,11 +742,6 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
       // triggerChange will also update selected values
       triggerChange(values, mergedActivePickerIndex);
       // clear hover value style
-      if (mergedActivePickerIndex === 0) {
-        onStartLeave();
-      } else {
-        onEndLeave();
-      }
     } else {
       setSelectedValue(values);
     }
@@ -867,7 +756,26 @@ function RangePickerPanel<DateType>(props: RangePickerProps<DateType>) {
         onSelect: onContextSelect,
       }}
     >
-      {rangePanel}
+      <div className={`${prefixCls}-wrapper`}>
+        {!!rangeLabels.length && (
+          <ShortCutPanel
+            rangeList={rangeList}
+            needConfirmButton={false}
+            setRangeHoverValue={setRangeHoverValue}
+          />
+        )}
+        <div>
+          <RangeResult
+            format={format}
+            picker="date"
+            locale={locale}
+            selectedValue={selectedValue}
+            generateConfig={generateConfig}
+          />
+          {rangePanel}
+          <div className={`${prefixCls}-footer`}>footer</div>
+        </div>
+      </div>
     </PanelContext.Provider>
   );
 }
