@@ -1,5 +1,7 @@
 # Rangepicker
 
+- [Preview](https://niexiaofei1988.github.io/rangepicker/)
+
 ## Getting Started
 
 Install dependencies,
